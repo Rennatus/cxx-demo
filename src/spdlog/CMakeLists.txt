@@ -1,0 +1,10 @@
+find_package(spdlog REQUIRED)
+add_executable(spdlog-demo demo.cpp logger.hpp)
+target_link_libraries(spdlog-demo PRIVATE spdlog::spdlog)
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  message(STATUS "编译为调试模式")
+  target_compile_definitions(spdlog-demo PRIVATE DEBUG)
+else()
+  message(STATUS "编译为发布模式")
+endif()
