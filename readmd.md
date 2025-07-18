@@ -1,5 +1,3 @@
-conan 包管理
-
-```
-conan install . --profile=profiles/debug --output-folder=build --build=missing
-```
+conan install . -s build_type=Debug --profile:host profiles/macos --profile:build profiles/macos --build=missing
+conan build . -s build_type=Debug --profile:host profiles/macos --profile:build profiles/macos --build=missing
+conan build . -s build_type=Release --profile:host profiles/macos --profile:build profiles/macos --build=missing

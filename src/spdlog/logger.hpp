@@ -1,248 +1,199 @@
-#ifndef CLOGGER_HPP
-#define CLOGGER_HPP
+#pragma once
 
-#include <fmt/core.h>
-#include <spdlog/common.h>
+#include <filesystem>
+#include <source_location>
+
+#include <spdlog/async.h>
+#include <spdlog/logger.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 #include <cstddef>
-#include <filesystem>
+#include <iostream>
+#include <memory>
+#include <mutex>
 #include <source_location>
-#include <string_view>
-
-class CLogger final {
- public:
-  /**
-   * 获取 Logger 单例实例
-   */
-  static CLogger& GetInstance() {
-    static CLogger instance;
-    return instance;
-  }
-
-  /**
-   * 初始化默认 logger，默认名称为 "default"
-   * @param log_dir 日志目录
-   * @param file_name 日志文件名（不含路径）
-   * @param file_size 单个日志文件最大大小
-   * @param file_count 最大日志文件数量
-   */
-  void InitDefaultLogger(std::string_view log_dir = "./logs/", std::string_view file_name = "app",
-                         size_t file_size = 10485760, size_t file_count = 3) {
-    CreateLogger("default", log_dir, file_name, file_size, file_count);
-  }
-
-  /**
-   * 创建或获取 logger，logger 名称与日志文件名绑定
-   * @param name logger 名称
-   * @param log_dir 日志目录
-   * @param file_name 日志文件名（不含路径）
-   * @param file_size 单个日志文件最大大小
-   * @param file_count 最大日志文件数量
-   * @return 新建或已有的 logger 指针
-   */
-  std::shared_ptr<spdlog::logger> CreateLogger(const std::string& name,
-                                               std::string_view log_dir = "./logs/",
-                                               std::string_view file_name = "default",
-                                               size_t file_size = 10485760, size_t file_count = 3) {
-    std::lock_guard lock(mutex_);
-    auto it = loggers_.find(name);
-    if (it != loggers_.end()) {
-      return it->second;
-    }
-
-    std::vector<spdlog::sink_ptr> sinks;
-    // 控制台 sink
-    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-    sinks.push_back(console_sink);
-
-    // 文件 sink，文件名与 logger 名称无关，使用传入的 file_name
-    std::string file_path = std::string(log_dir) + "/" + std::string(file_name) + ".log";
-    auto file_sink =
-        std::make_shared<spdlog::sinks::rotating_file_sink_mt>(file_path, file_size, file_count);
-    sinks.push_back(file_sink);
-
-    auto logger = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
-
-#ifdef DEBUG
-    logger->set_pattern("%^[%Y-%m-%d %H:%M:%S.%e] [thread %t] [%l] [%n] %v %$");
-    logger->set_level(spdlog::level::debug);
-#else
-    logger->set_pattern("%^[%Y-%m-%d %H:%M:%S] [thread %t] [%l] [%n] %v %$");
-    logger->set_level(spdlog::level::info);
+#include <string>
+#if __cplusplus < 202002L
+#error "C++20 required"
 #endif
 
-    spdlog::register_logger(logger);
-    loggers_[name] = logger;
-    logger_files_[name] = std::string(file_name);
-    return logger;
-  }
-
-  /**
-   * 设置指定 logger 的日志级别，若 logger 为空则设置所有 logger
-   * @param level 日志级别
-   * @param logger 指定 logger，默认 nullptr 表示全部
-   */
-  void SetLevel(spdlog::level::level_enum level, std::shared_ptr<spdlog::logger> logger = nullptr) {
-    std::lock_guard lock(mutex_);
-    if (logger) {
-      logger->set_level(level);
-    } else {
-      for (auto& [_, lg] : loggers_) {
-        lg->set_level(level);
-      }
-    }
-  }
-
-  /**
-   * 设置指定 logger 的日志格式，若 logger 为空则设置所有 logger
-   * @param pattern spdlog 格式字符串
-   * @param logger 指定 logger，默认 nullptr 表示全部
-   */
-  void SetPattern(const std::string& pattern, std::shared_ptr<spdlog::logger> logger = nullptr) {
-    std::lock_guard lock(mutex_);
-    if (logger) {
-      logger->set_pattern(pattern);
-    } else {
-      for (auto& [_, lg] : loggers_) {
-        lg->set_pattern(pattern);
-      }
-    }
-  }
-
-  /**
-   * 删除指定名称的 logger，返回是否成功
-   * @param name logger 名称
-   */
-  bool RemoveLogger(const std::string& name) {
-    std::lock_guard lock(mutex_);
-    auto it = loggers_.find(name);
-    if (it != loggers_.end()) {
-      spdlog::drop(name);
-      loggers_.erase(it);
-      logger_files_.erase(name);
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * 判断指定名称的 logger 是否存在
-   * @param name logger 名称
-   */
-  bool HasLogger(const std::string& name) {
-    std::lock_guard lock(mutex_);
-    return loggers_.find(name) != loggers_.end();
-  }
-
-  /**
-   * 获取指定名称的 logger，若不存在返回 nullptr
-   * @param name logger 名称
-   */
-  std::shared_ptr<spdlog::logger> GetLogger(const std::string& name) {
-    std::lock_guard lock(mutex_);
-    auto it = loggers_.find(name);
-    if (it != loggers_.end()) {
-      return it->second;
-    }
-    return nullptr;
-  }
-
-  /**
-   * 获取 logger 对应的日志文件名，若不存在返回空字符串
-   * @param name logger 名称
-   */
-  std::string GetLoggerFileName(const std::string& name) {
-    std::lock_guard lock(mutex_);
-    auto it = logger_files_.find(name);
-    if (it != logger_files_.end()) {
-      return it->second;
-    }
-    return "";
-  }
-
-  // 调试版本重载
-  template <typename... Args>
-  void Log(const std::string& name, spdlog::level::level_enum level,
-           const std::source_location& location, fmt::format_string<Args...> msg, Args&&... args) {
-    std::string prefix = " [" +
-                         std::string(std::filesystem::path(location.file_name()).filename()) + ":" +
-                         std::to_string(location.line()) + "] [" + location.function_name() + "] ";
-    std::string formatted_msg = prefix + fmt::format(msg, std::forward<Args>(args)...);
-
-    LogImpl(name, level, formatted_msg);
-  }
-
-  // 发布版本重载
-  template <typename... Args>
-  void Log(const std::string& name, spdlog::level::level_enum level,
-           fmt::format_string<Args...> msg, Args&&... args) {
-    std::string formatted_msg = fmt::format(msg, std::forward<Args>(args)...);
-    LogImpl(name, level, formatted_msg);
-  }
-
-  CLogger(const CLogger&) = delete;
-  CLogger& operator=(const CLogger&) = delete;
-  CLogger(CLogger&&) = delete;
-
- private:
-  /**
-   * 记录指定 logger 的日志，日志中带 logger 名称
-   * @tparam Args 格式化参数模板
-   * @param name logger 名称
-   * @param level 日志级别
-   * @param msg 格式化字符串
-   * @param args 格式化参数
-   * @param location 调用点信息，默认自动获取
-   */
-  template <typename... Args>
-  void LogImpl(const std::string& name, spdlog::level::level_enum level,
-               const std::string& message) {
-    std::lock_guard lock(mutex_);
-    auto it = loggers_.find(name);
-    if (it == loggers_.end()) {
-      return;
-    }
-    it->second->log(level, message);
-  }
-
-  CLogger() = default;
-  ~CLogger() = default;
-
-  std::mutex mutex_;
-  std::unordered_map<std::string, std::string> logger_files_;  // logger 名称 -> 文件名映射
-  std::unordered_map<std::string, std::shared_ptr<spdlog::logger>> loggers_;
+namespace Logging {
+struct Config {
+  bool console = true;
+  bool file = false;
+  std::string log_dir = "./logs";
+  size_t file_size = 1024 * 1024 * 5;
+  size_t file_count = 3;
+  bool async = false;
+  size_t queue_size = 8192;
+  size_t thread_count = 1;
 };
 
-#ifdef DEBUG
-#define LOG_TRACE(...)                                                                         \
-  CLogger::GetInstance().Log("default", spdlog::level::trace, std::source_location::current(), \
-                             __VA_ARGS__)
-#define LOG_DEBUG(...)                                                                         \
-  CLogger::GetInstance().Log("default", spdlog::level::debug, std::source_location::current(), \
-                             __VA_ARGS__)
-#define LOG_INFO(...)                                                                         \
-  CLogger::GetInstance().Log("default", spdlog::level::info, std::source_location::current(), \
-                             __VA_ARGS__)
-#define LOG_WARN(...)                                                                         \
-  CLogger::GetInstance().Log("default", spdlog::level::warn, std::source_location::current(), \
-                             __VA_ARGS__)
-#define LOG_ERROR(...)                                                                       \
-  CLogger::GetInstance().Log("default", spdlog::level::err, std::source_location::current(), \
-                             __VA_ARGS__)
-#define LOG_CRITICAL(...)                                                                         \
-  CLogger::GetInstance().Log("default", spdlog::level::critical, std::source_location::current(), \
-                             __VA_ARGS__)
-#else
+class LoggerManager {
+ public:
+  static LoggerManager& instance() {
+    static LoggerManager manager;
+    return manager;
+  }
 
-#define LOG_TRACE_L(name, ...) CLogger::GetInstance().Log(name, spdlog::level::trace, __VA_ARGS__)
-#define LOG_DEBUG_L(name, ...) CLogger::GetInstance().Log(name, spdlog::level::debug, __VA_ARGS__)
-#define LOG_INFO_L(name, ...) CLogger::GetInstance().Log(name, spdlog::level::info, __VA_ARGS__)
-#define LOG_WARN_L(name, ...) CLogger::GetInstance().Log(name, spdlog::level::warn, __VA_ARGS__)
-#define LOG_ERROR_L(name, ...) CLogger::GetInstance().Log(name, spdlog::level::err, __VA_ARGS__)
-#define LOG_CRITICAL_L(name, ...) \
-  CLogger::GetInstance().Log(name, spdlog::level::critical(), __VA_ARGS__)
-#endif
+  std::shared_ptr<spdlog::logger> GetOrCreate(const std::string& name = "default",
+                                              const Config& config = {}) {
+    // 检查日志器是否已存在
+    if (auto logger = get_logger(name)) {
+      return logger;
+    }
+    return create_logger(name, config);
+  }
 
-#endif
+ private:
+  mutable std::mutex mutex_;
+
+  LoggerManager() {
+    // 创建默认日志器
+    create_logger("default");
+  }
+
+  ~LoggerManager() { shutdown(); }
+
+  LoggerManager(const LoggerManager&) = delete;
+  LoggerManager& operator=(const LoggerManager&) = delete;
+
+  void shutdown() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    spdlog::shutdown();
+  }
+
+  std::shared_ptr<spdlog::logger> get_logger(const std::string& name) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return spdlog::get(name);
+  }
+
+  std::shared_ptr<spdlog::logger> create_logger(const std::string& name,
+                                                const Config& config = {}) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    try {
+      std::vector<spdlog::sink_ptr> sinks;
+      if (config.console) {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        sinks.push_back(console_sink);
+      }
+
+      if (config.file) {
+        std::string current_dir = std::filesystem::current_path();
+
+        auto path = (std::filesystem::relative(config.log_dir).append(name + ".log"));
+        auto file_path = current_dir / path;
+        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            file_path, config.file_size, config.file_count);
+        sinks.push_back(file_sink);
+      }
+      std::shared_ptr<spdlog::logger> logger;
+      if (config.async) {
+        // 异步日志配置
+        spdlog::init_thread_pool(config.queue_size, config.thread_count);
+        logger = std::make_shared<spdlog::async_logger>(name, sinks.begin(), sinks.end(),
+                                                        spdlog::thread_pool(),
+                                                        spdlog::async_overflow_policy::block);
+      } else {
+        // 同步日志
+        logger = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
+      }
+      // 设置日志格式
+      logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%n] [%^%l%$] [%s:%#] [thread:%t] %v");
+      spdlog::register_logger(logger);
+      return logger;
+    } catch (const spdlog::spdlog_ex& ex) {
+      if (auto default_logger = spdlog::get("default")) {
+        default_logger->error("Failed to initialize logger '{}': {}", name, ex.what());
+      }
+      return nullptr;
+    }
+  }
+};
+
+class LoggerBuilder {
+
+ public:
+  LoggerBuilder(const std::string& name) : name_(name) {}
+
+  template <typename... Args>
+  void trace_with_loc(const std::source_location& loc, const std::string_view& msg,
+                      Args&&... args) const {
+    log(spdlog::level::trace, loc, msg, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  void debug_with_loc(const std::source_location& loc, const std::string_view& msg,
+                      Args&&... args) const {
+    log(spdlog::level::debug, loc, msg, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  void info_with_loc(const std::source_location& loc, const std::string_view& msg,
+                     Args&&... args) const {
+    log(spdlog::level::info, loc, msg, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  void warn_with_loc(const std::source_location& loc, const std::string_view& msg,
+                     Args&&... args) const {
+    log(spdlog::level::warn, loc, msg, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  void error_with_loc(const std::source_location& loc, const std::string_view& msg,
+                      Args&&... args) const {
+    log(spdlog::level::err, loc, msg, std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  void critical_with_loc(const std::source_location& loc, const std::string_view& msg,
+                         Args&&... args) const {
+    log(spdlog::level::critical, loc, msg, std::forward<Args>(args)...);
+  }
+
+ private:
+  std::string name_;
+
+  // 获取或创建日志器
+  std::shared_ptr<spdlog::logger> get_or_create() const {
+    return LoggerManager::instance().GetOrCreate(name_);
+  }
+
+  // log 核心实现，通过变参模板实现格式化和参数转发
+  template <typename... Args>
+  void log(spdlog::level::level_enum level, const std::source_location& loc,
+           const std::string_view& msg, Args&&... args) const {
+    auto logger = get_or_create();
+    if (logger && logger->should_log(level)) {
+      spdlog::source_loc source{loc.file_name(), static_cast<int>(loc.line()), loc.function_name()};
+      logger->log(source, level, fmt::runtime(msg), std::forward<Args>(args)...);
+    } else if (name_ != "default") {
+      if (auto default_logger = LoggerManager::instance().GetOrCreate("default")) {
+        default_logger->error("Failed to log to '{}': logger initialization failed", name_);
+      }
+    }
+  }
+};
+
+// 全局配置函数
+inline void ConfigureLogger(const std::string& name = "default", const Config& config = {}) {
+  LoggerManager::instance().GetOrCreate(name, config);
+}
+
+// 全局日志工厂函数 - 核心接口
+inline LoggerBuilder Logger(const std::string& name = "default") {
+  return LoggerBuilder(name);
+}
+};  // namespace Logging
+
+// 日志宏，自动捕获调用点
+#define LOG_TRACE(logger, ...) (logger).trace_with_loc(std::source_location::current(), __VA_ARGS__)
+#define LOG_DEBUG(logger, ...) (logger).debug_with_loc(std::source_location::current(), __VA_ARGS__)
+#define LOG_INFO(logger, ...) (logger).info_with_loc(std::source_location::current(), __VA_ARGS__)
+#define LOG_WARN(logger, ...) (logger).warn_with_loc(std::source_location::current(), __VA_ARGS__)
+#define LOG_ERROR(logger, ...) (logger).error_with_loc(std::source_location::current(), __VA_ARGS__)
+#define LOG_CRITICAL(logger, ...) \
+  (logger).critical_with_loc(std::source_location::current(), __VA_ARGS__)

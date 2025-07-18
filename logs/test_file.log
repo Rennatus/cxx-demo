@@ -1,0 +1,3 @@
+[2025-07-18 21:39:47.349] [test_file] [info] [logger_test.cpp:115] [thread:393118] 测试文件日志输出
+[2025-07-18 21:40:32.118] [test_file] [info] [logger_test.cpp:115] [thread:394127] 测试文件日志输出
+[2025-07-18 21:40:54.477] [test_file] [info] [logger_test.cpp:115] [thread:394830] 测试文件日志输出

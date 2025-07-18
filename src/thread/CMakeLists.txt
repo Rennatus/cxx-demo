@@ -1,0 +1,5 @@
+add_executable(semaphore-demo semaphore_demo.cpp)
+add_executable(latch-demo latch_demo.cpp)
+add_executable(barrier-demo barrier_demo.cpp)
+add_executable(spinlock-demo spin_lock_demo.cpp)
+add_executable(cond-var-demo condition_variable.cpp)
